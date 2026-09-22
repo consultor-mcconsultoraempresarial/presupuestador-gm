@@ -152,7 +152,7 @@
   .suggest-empty{padding:10px;font-size:12.5px;color:#9AA3AF;}
 
   .line-item{
-    display:grid;grid-template-columns:1fr 46px 90px 90px 24px;gap:6px;
+    display:grid;grid-template-columns:1fr 40px 72px 44px 74px 20px;gap:5px;
     align-items:center;padding:7px 0;border-bottom:1px solid #F0F1F3;font-size:13px;
   }
   .line-item input{padding:5px 6px;font-size:12.5px;}
@@ -165,7 +165,11 @@
   .li-detail-row{padding:2px 0 9px;border-bottom:1px solid #F0F1F3;}
   .li-detail-row input{font-size:12px;}
   .item-desc{font-size:11px;color:#9A927E;font-style:italic;margin-top:2px;}
-  .lines-head{display:grid;grid-template-columns:1fr 46px 90px 90px 24px;gap:6px;font-size:10.5px;color:#9AA3AF;text-transform:uppercase;letter-spacing:.03em;padding-bottom:4px;border-bottom:1px solid var(--panel-line);}
+  .li-discount{display:flex;flex-direction:column;gap:2px;min-width:0;}
+  .li-discount .li-disc-type{padding:2px 1px;font-size:10.5px;width:100%;}
+  .li-discount .li-disc-value{padding:3px 4px;font-size:11.5px;width:100%;min-width:0;}
+  .li-gross-strike{color:#B7BEC8;text-decoration:line-through;font-size:11px;display:block;}
+  .lines-head{display:grid;grid-template-columns:1fr 40px 72px 44px 74px 20px;gap:5px;font-size:10.5px;color:#9AA3AF;text-transform:uppercase;letter-spacing:.03em;padding-bottom:4px;border-bottom:1px solid var(--panel-line);}
   .manual-add{display:flex;gap:6px;margin-top:10px;}
   .manual-add input:first-child{flex:2;}
 
@@ -413,7 +417,7 @@
         </div>
 
         <div style="margin-top:14px;">
-          <div class="lines-head"><span>Producto</span><span>Cant.</span><span>Precio</span><span>Subtotal</span><span></span></div>
+          <div class="lines-head"><span>Producto</span><span>Cant.</span><span>Precio</span><span>Desc.</span><span>Subtotal</span><span></span></div>
           <div id="lineItems"></div>
         </div>
 
@@ -487,6 +491,7 @@
         <div class="qs-totals">
           <table>
             <tr><td class="tl">Subtotal</td><td class="tv" id="pvSubtotal">$ 0</td></tr>
+            <tr id="pvItemDiscountRow" style="display:none;"><td class="tl">Descuentos por producto</td><td class="tv" id="pvItemDiscountValue">$ 0</td></tr>
             <tr id="pvDiscountRow" style="display:none;"><td class="tl" id="pvDiscountLabel">Descuento</td><td class="tv" id="pvDiscountValue">$ 0</td></tr>
             <tr class="total"><td>Total</td><td class="tv" id="pvTotal">$ 0</td></tr>
           </table>
@@ -857,7 +862,7 @@
 
   // ---------------- line items ----------------
   function addLine(name, price, qty){
-    lines.push({id: uid(), name, price: price||0, qty: qty||1, desc:'', showDetail:false});
+    lines.push({id: uid(), name, price: price||0, qty: qty||1, desc:'', showDetail:false, itemDiscount:{type:'none', value:0}});
     renderLines(); renderPreview();
   }
 
@@ -866,13 +871,34 @@
     renderLines(); renderPreview();
   }
 
+  // gross/net/discount amount for a single line item, clamped so the discount
+  // never goes negative or exceeds the line's gross total
+  function lineTotals(l){
+    const gross = l.qty * l.price;
+    const d = l.itemDiscount || {type:'none', value:0};
+    let discAmount = 0;
+    if (d.type === 'percent') discAmount = gross * (d.value/100);
+    else if (d.type === 'fixed') discAmount = d.value;
+    discAmount = Math.min(Math.max(discAmount,0), gross);
+    return {gross, discAmount, net: gross - discAmount};
+  }
+
+  function renderLineSubtotal(l){
+    const {gross, discAmount, net} = lineTotals(l);
+    return discAmount > 0
+      ? `<span class="li-gross-strike">${money(gross)}</span>${money(net)}`
+      : money(net);
+  }
+
   function renderLines(){
     const wrap = $('lineItems');
     if (!lines.length){
       wrap.innerHTML = '<div class="hint" style="padding:10px 0;">Todavía no agregaste productos.</div>';
       return;
     }
-    wrap.innerHTML = lines.map(l => `
+    wrap.innerHTML = lines.map(l => {
+      const d = l.itemDiscount || {type:'none', value:0};
+      return `
       <div class="line-item-wrap" data-id="${l.id}">
         <div class="line-item">
           <span class="li-name-wrap">
@@ -881,26 +907,51 @@
           </span>
           <input type="number" min="1" class="li-qty" value="${l.qty}">
           <input type="number" min="0" class="li-price" value="${l.price}">
-          <span class="li-subtotal">${money(l.qty * l.price)}</span>
+          <span class="li-discount">
+            <select class="li-disc-type" title="Tipo de descuento">
+              <option value="none" ${d.type==='none'?'selected':''}>—</option>
+              <option value="percent" ${d.type==='percent'?'selected':''}>%</option>
+              <option value="fixed" ${d.type==='fixed'?'selected':''}>$</option>
+            </select>
+            <input type="number" min="0" class="li-disc-value" placeholder="0" value="${d.value||''}" ${d.type==='none'?'disabled':''} title="Valor del descuento">
+          </span>
+          <span class="li-subtotal">${renderLineSubtotal(l)}</span>
           <span class="li-del" title="Quitar">✕</span>
         </div>
         <div class="li-detail-row" style="display:${l.showDetail ? 'block' : 'none'};">
           <input type="text" class="li-desc" placeholder="Medidas, material, color, terminación...">
         </div>
       </div>
-    `).join('');
+    `;
+    }).join('');
     wrap.querySelectorAll('.line-item-wrap').forEach(itemWrap => {
       const id = itemWrap.dataset.id;
       const l = lines.find(x=>x.id===id);
       const row = itemWrap.querySelector('.line-item');
+      const subtotalEl = row.querySelector('.li-subtotal');
       row.querySelector('.li-qty').addEventListener('input', e => {
         l.qty = Math.max(1, parseFloat(e.target.value)||1);
-        row.querySelector('.li-subtotal').textContent = money(l.qty*l.price);
+        subtotalEl.innerHTML = renderLineSubtotal(l);
         renderPreview();
       });
       row.querySelector('.li-price').addEventListener('input', e => {
         l.price = parseFloat(e.target.value)||0;
-        row.querySelector('.li-subtotal').textContent = money(l.qty*l.price);
+        subtotalEl.innerHTML = renderLineSubtotal(l);
+        renderPreview();
+      });
+      row.querySelector('.li-disc-type').addEventListener('change', e => {
+        l.itemDiscount = l.itemDiscount || {type:'none', value:0};
+        l.itemDiscount.type = e.target.value;
+        const valueInput = row.querySelector('.li-disc-value');
+        valueInput.disabled = l.itemDiscount.type === 'none';
+        if (l.itemDiscount.type === 'none'){ l.itemDiscount.value = 0; valueInput.value = ''; }
+        subtotalEl.innerHTML = renderLineSubtotal(l);
+        renderPreview();
+      });
+      row.querySelector('.li-disc-value').addEventListener('input', e => {
+        l.itemDiscount = l.itemDiscount || {type:'none', value:0};
+        l.itemDiscount.value = parseFloat(e.target.value)||0;
+        subtotalEl.innerHTML = renderLineSubtotal(l);
         renderPreview();
       });
       row.querySelector('.li-del').addEventListener('click', () => removeLine(id));
@@ -962,12 +1013,14 @@
   // ---------------- totals ----------------
   function computeTotals(){
     const subtotal = lines.reduce((s,l)=> s + l.qty*l.price, 0);
+    const itemDiscountTotal = lines.reduce((s,l)=> s + lineTotals(l).discAmount, 0);
+    const subtotalAfterItemDiscounts = subtotal - itemDiscountTotal;
     let discAmount = 0;
-    if (discount.type === 'percent') discAmount = subtotal * (discount.value/100);
+    if (discount.type === 'percent') discAmount = subtotalAfterItemDiscounts * (discount.value/100);
     else if (discount.type === 'fixed') discAmount = discount.value;
-    discAmount = Math.min(Math.max(discAmount,0), subtotal);
-    const total = subtotal - discAmount;
-    return {subtotal, discAmount, total};
+    discAmount = Math.min(Math.max(discAmount,0), subtotalAfterItemDiscounts);
+    const total = subtotalAfterItemDiscounts - discAmount;
+    return {subtotal, itemDiscountTotal, subtotalAfterItemDiscounts, discAmount, total};
   }
 
   // ---------------- preview ----------------
@@ -996,13 +1049,23 @@
     $('pvClientName').textContent = cName || 'Cliente sin nombre';
     $('pvClientDetail').textContent = [$('clientPhone').value, $('clientMail').value, $('clientCuit').value].filter(Boolean).join(' · ');
 
-    const rows = lines.map(l => `
-      <tr><td>${escapeHtml(l.name)}${l.desc ? `<div class="item-desc">${escapeHtml(l.desc)}</div>` : ''}</td><td class="num">${l.qty}</td><td class="num">${money(l.price)}</td><td class="num">${money(l.qty*l.price)}</td></tr>
-    `).join('');
+    const rows = lines.map(l => {
+      const {gross, discAmount: liDisc, net} = lineTotals(l);
+      const subtotalCell = liDisc > 0
+        ? `<span class="li-gross-strike">${money(gross)}</span>${money(net)}`
+        : money(net);
+      return `<tr><td>${escapeHtml(l.name)}${l.desc ? `<div class="item-desc">${escapeHtml(l.desc)}</div>` : ''}</td><td class="num">${l.qty}</td><td class="num">${money(l.price)}</td><td class="num">${subtotalCell}</td></tr>`;
+    }).join('');
     $('pvItems').innerHTML = rows || '<tr><td colspan="4" style="color:#9A927E;font-style:italic;">Agregá productos para verlos acá</td></tr>';
 
-    const {subtotal, discAmount, total} = computeTotals();
+    const {subtotal, itemDiscountTotal, subtotalAfterItemDiscounts, discAmount, total} = computeTotals();
     $('pvSubtotal').textContent = money(subtotal);
+    if (itemDiscountTotal > 0){
+      $('pvItemDiscountRow').style.display = '';
+      $('pvItemDiscountValue').textContent = '- ' + money(itemDiscountTotal);
+    } else {
+      $('pvItemDiscountRow').style.display = 'none';
+    }
     if (discAmount > 0){
       $('pvDiscountRow').style.display = '';
       $('pvDiscountLabel').textContent = discount.type === 'percent' ? `Descuento (${discount.value}%)` : 'Descuento';
@@ -1049,7 +1112,7 @@
     $('clientPhone').value = s.clientPhone || '';
     $('clientMail').value = s.clientMail || '';
     $('clientCuit').value = s.clientCuit || '';
-    lines = s.lines || [];
+    lines = (s.lines || []).map(l => ({itemDiscount:{type:'none', value:0}, ...l}));
     discount = s.discount || {type:'none', value:0};
     $('discountType').value = discount.type;
     $('discountValue').value = discount.value || '';
@@ -1139,7 +1202,7 @@
   }
 
   function buildTextSummary(){
-    const {subtotal, discAmount, total} = computeTotals();
+    const {subtotal, itemDiscountTotal, discAmount, total} = computeTotals();
     const issue = $('issueDate').value;
     let validUntil = '—';
     if (issue){
@@ -1148,7 +1211,10 @@
       validUntil = fmtDate(d);
     }
     const lines_txt = lines.map(l => {
-      let t = `• ${l.name} x${l.qty} — ${money(l.qty*l.price)}`;
+      const {gross, discAmount: liDisc, net} = lineTotals(l);
+      let t = liDisc > 0
+        ? `• ${l.name} x${l.qty} — ${money(gross)} → ${money(net)} (${l.itemDiscount.type === 'percent' ? l.itemDiscount.value + '% off' : money(liDisc) + ' off'})`
+        : `• ${l.name} x${l.qty} — ${money(gross)}`;
       if (l.desc) t += `\n   (${l.desc})`;
       return t;
     }).join('\n');
@@ -1159,6 +1225,7 @@
     if ($('productionTime').value) out += `Producción estimada: ${$('productionTime').value}\n`;
     out += `\n${lines_txt || '(sin productos cargados)'}\n\n`;
     out += `Subtotal: ${money(subtotal)}\n`;
+    if (itemDiscountTotal > 0) out += `Descuentos por producto: -${money(itemDiscountTotal)}\n`;
     if (discAmount > 0) out += `Descuento: -${money(discAmount)}\n`;
     out += `*Total: ${money(total)}*\n`;
     const notes = $('quoteNotes').value.trim();
